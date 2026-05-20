@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>両面神経衰弱</title>
+<style>
+    body {
+        font-family: 'Helvetica Neue', Arial, sans-serif;
+        background-color: #f0f4f8;
+        color: #333;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 20px;
+        margin: 0;
+    }
+    h1 {
+        margin-bottom: 10px;
+        color: #2c3e50;
+    }
+    .info {
+        margin-bottom: 20px;
+        text-align: center;
+    }
+    .message {
+        font-weight: bold;
+        height: 1.5em;
+        color: #333;
+        margin-bottom: 5px;
+    }
+    .score {
+        font-size: 1.1em;
+        color: #555;
+    }
+    .board {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 15px;
+        max-width: 600px;
+        width: 100%;
+    }
+    @media (max-width: 500px) {
+        .board {
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+        }
+    }
+    .card {
+        aspect-ratio: 3 / 4;
+        perspective: 1000px;
+        cursor: pointer;
+    }
+    .card-inner {
+        width: 100%;
+        height: 100%;
+        transition: transform 0.5s, opacity 0.5s;
+        transform-style: preserve-3d;
+        position: relative;
+    }
+    .card.flipped .card-inner, .card.matched .card-inner {
+        transform: rotateY(180deg);
+    }
+    .card.matched .card-inner {
+        opacity: 0.4;
+    }
+    .card.matched {
+        cursor: default;
+    }
+    .card-face {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        backface-visibility: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 2.5rem;
+        font-weight: bold;
+        border-radius: 10px;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        user-select: none;
+    }
+    .card-front {
+        background-color: #fff;
+        color: #2c3e50;
+        border: 2px solid #bdc3c7;
+    }
+    .card-back {
+        background-color: #3498db;
+        color: #fff;
+        transform: rotateY(180deg);
+        border: 2px solid #2980b9;
+        flex-direction: column;
+    }
+    .card.matched .card-back {
+        background-color: #27ae60;
+        border-color: #2ecc71;
+    }
+    /* 推理の補助として、裏面にも元の「表の文字」を小さく表示します */
+    .front-hint {
+        position: absolute;
+        top: 8px;
+        left: 10px;
+        font-size: 0.9rem;
+        font-weight: normal;
+        opacity: 0.9;
+    }
+    .controls {
+        margin-top: 25px;
+    }
+    button {
+        padding: 10px 25px;
+        font-size: 1rem;
+        cursor: pointer;
+        background-color: #2c3e50;
+        color: white;
+        border: none;
+        border-radius: 5px;
+        transition: background-color 0.2s;
+    }
+    button:hover {
+        background-color: #1a252f;
+    }
+    .instructions {
+        margin-top: 30px;
+        max-width: 600px;
+        background: #fff;
+        padding: 15px 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        font-size: 0.9rem;
+        line-height: 1.6;
+    }
+</style>
+</head>
+<body>
+
+<h1>両面神経衰弱</h1>
+<div class="info">
+    <div class="message" id="message">カードを2枚めくってください。</div>
+    <div class="score" id="score">残りペア: 7</div>
+</div>
+
+<div class="board" id="game-board"></div>
+
+<div class="controls">
+    <button onclick="initGame()">リスタート</button>
+</div>
+
+<div class="instructions">
+    <strong>【ルールと戦略】</strong><br>
+    ・A〜Eの文字の組み合わせ（全15枚）を使った神経衰弱です。<br>
+    ・めくって<strong>「裏面の文字」</strong>が揃えばペア成立となります（15枚のため最後に1枚余ります）。<br>
+    ・全体を通してA〜Eの文字は<strong>それぞれ合計6個ずつ（裏表合わせて）</strong>存在します。<br>
+    ・「6 - 表に見えている文字の数」を計算することで、裏面に隠れている文字の数を完全に予測・特定できます。消去法を駆使して全ペアクリアを目指しましょう！
+</div>
+
+<script>
+    const letters = ['A', 'B', 'C', 'D', 'E'];
+    let cardsData = [];
+    let firstCard = null;
+    let secondCard = null;
+    let lockBoard = false;
+    let matchedPairs = 0;
+
+    // ゲームが手詰まりなくクリア可能になるカード配置を生成
+    function generateValidCards() {
+        let valid = false;
+        let finalCards = [];
+
+        while (!valid) {
+            finalCards = [];
+            let backCounts = { 'A': 1, 'B': 1, 'C': 1, 'D': 1, 'E': 1 };
+            
+            // ゾロ目のカード（AA, BB...）
+            letters.forEach(l => {
+                finalCards.push({ front: l, back: l });
+            });
+
+            // 異なる文字の組み合わせ
+            let mixed = [
+                ['A','B'], ['A','C'], ['A','D'], ['A','E'],
+                ['B','C'], ['B','D'], ['B','E'],
+                ['C','D'], ['C','E'],
+                ['D','E']
+            ];
+
+            mixed.forEach(pair => {
+                let isReversed = Math.random() > 0.5;
+                let front = isReversed ? pair[1] : pair[0];
+                let back = isReversed ? pair[0] : pair[1];
+                finalCards.push({ front, back });
+                backCounts[back]++;
+            });
+
+            // 【重要ロジック】 最後に必ず1枚だけ余るようにするため、
+            // 「裏面に隠れている文字の総数」のうち、奇数個になっている文字が
+            // "ちょうど1種類"になる配置のみを採用する（これで詰みを防止します）
+            let odds = Object.values(backCounts).filter(count => count % 2 !== 0).length;
+            if (odds === 1) {
+                valid = true;
+            }
+        }
+        
+        // 盤面に並べるためにシャッフル
+        finalCards.sort(() => Math.random() - 0.5);
+        
+        return finalCards.map((c, index) => ({
+            ...c,
+            id: index,
+            isFlipped: false,
+            isMatched: false
+        }));
+    }
+
+    function initGame() {
+        const board = document.getElementById('game-board');
+        board.innerHTML = '';
+        firstCard = null;
+        secondCard = null;
+        lockBoard = false;
+        matchedPairs = 0;
+        updateScore();
+        document.getElementById('message').textContent = 'カードを2枚めくってください。';
+        document.getElementById('message').style.color = '#333';
+
+        cardsData = generateValidCards();
+        
+        cardsData.forEach((card, index) => {
+            const cardElement = document.createElement('div');
+            cardElement.classList.add('card');
+            cardElement.dataset.index = index;
+
+            const cardInner = document.createElement('div');
+            cardInner.classList.add('card-inner');
+
+            // 表面
+            const cardFront = document.createElement('div');
+            cardFront.classList.add('card-face', 'card-front');
+            cardFront.textContent = card.front;
+
+            // 裏面
+            const cardBack = document.createElement('div');
+            cardBack.classList.add('card-face', 'card-back');
+            
+            // 推理しやすくするため、裏面にも小さく表面の文字を残す
+            const hint = document.createElement('div');
+            hint.classList.add('front-hint');
+            hint.textContent = `表:${card.front}`;
+            
+            const backText = document.createElement('div');
+            backText.textContent = card.back;
+
+            cardBack.appendChild(hint);
+            cardBack.appendChild(backText);
+
+            cardInner.appendChild(cardFront);
+            cardInner.appendChild(cardBack);
+            cardElement.appendChild(cardInner);
+
+            cardElement.addEventListener('click', () => flipCard(index, cardElement));
+
+            board.appendChild(cardElement);
+        });
+    }
+
+    function updateScore() {
+        document.getElementById('score').textContent = `残りペア: ${7 - matchedPairs}`;
+    }
+
+    function flipCard(index, cardElement) {
+        if (lockBoard) return;
+        if (cardsData[index].isFlipped || cardsData[index].isMatched) return;
+
+        cardsData[index].isFlipped = true;
+        cardElement.classList.add('flipped');
+
+        if (firstCard === null) {
+            firstCard = { index, element: cardElement };
+            document.getElementById('message').textContent = 'もう1枚めくってください。';
+            document.getElementById('message').style.color = '#333';
+        } else {
+            secondCard = { index, element: cardElement };
+            lockBoard = true;
+            checkMatch();
+        }
+    }
+
+    function checkMatch() {
+        const c1 = cardsData[firstCard.index];
+        const c2 = cardsData[secondCard.index];
+
+        if (c1.back === c2.back) {
+            // ペア成立
+            c1.isMatched = true;
+            c2.isMatched = true;
+            matchedPairs++;
+            
+            firstCard.element.classList.add('matched');
+            secondCard.element.classList.add('matched');
+            
+            updateScore();
+            
+            if (matchedPairs === 7) {
+                document.getElementById('message').textContent = 'ゲームクリア！見事な推理です！';
+                document.getElementById('message').style.color = '#27ae60';
+            } else {
+                document.getElementById('message').textContent = 'ペア成立！';
+                document.getElementById('message').style.color = '#2980b9';
+            }
+            resetBoard();
+        } else {
+            // 不成立
+            document.getElementById('message').textContent = '違いました...';
+            document.getElementById('message').style.color = '#e74c3c';
+            
+            setTimeout(() => {
+                c1.isFlipped = false;
+                c2.isFlipped = false;
+                firstCard.element.classList.remove('flipped');
+                secondCard.element.classList.remove('flipped');
+                resetBoard();
+                
+                if (matchedPairs < 7) {
+                    document.getElementById('message').textContent = 'カードを2枚めくってください。';
+                    document.getElementById('message').style.color = '#333';
+                }
+            }, 1200);
+        }
+    }
+
+    function resetBoard() {
+        firstCard = null;
+        secondCard = null;
+        lockBoard = false;
+    }
+
+    // 初回起動
+    window.onload = initGame;
+</script>
+</body>
+</html>
