@@ -314,10 +314,10 @@
             selectedCards[0].element.classList.add('matched', currentPlayer === 1 ? 'p1-match' : 'p2-match');
             selectedCards[1].element.classList.add('matched', currentPlayer === 1 ? 'p1-match' : 'p2-match');
             
-            updateUI();
+            
             currentPlayer = currentPlayer === 1 ? 2 : 1;
             showMessage(`ペア成立！ 次は${currentPlayer}Pのターンです。`, '#27ae60');
-            
+            updateUI();
             setTimeout(() => {
                 selectedCards = [];
                 lockBoard = false;
