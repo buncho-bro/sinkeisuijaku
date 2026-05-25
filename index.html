@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>両面神経衰弱（原案準拠版）</title>
+<title>両面神経衰弱（2人対戦版）</title>
 <style>
     body {
         font-family: 'Helvetica Neue', Arial, sans-serif;
@@ -19,19 +19,53 @@
         margin-bottom: 10px;
         color: #2c3e50;
     }
+    
+    /* スコアとターン表示用UI */
+    .score-board {
+        display: flex;
+        gap: 20px;
+        margin-bottom: 15px;
+        width: 100%;
+        max-width: 600px;
+        justify-content: center;
+    }
+    .player-score {
+        padding: 10px 20px;
+        border-radius: 8px;
+        font-size: 1.2rem;
+        font-weight: bold;
+        background-color: #ecf0f1;
+        color: #7f8c8d;
+        border: 3px solid transparent;
+        transition: all 0.3s ease;
+        text-align: center;
+        flex: 1;
+        max-width: 200px;
+    }
+    .player1.active {
+        background-color: #e1f5fe;
+        color: #0277bd;
+        border-color: #03a9f4;
+        box-shadow: 0 0 10px rgba(3, 169, 244, 0.4);
+    }
+    .player2.active {
+        background-color: #fce4ec;
+        color: #c2185b;
+        border-color: #e91e63;
+        box-shadow: 0 0 10px rgba(233, 30, 99, 0.4);
+    }
+
     .info {
         margin-bottom: 20px;
         text-align: center;
     }
     .message {
         font-weight: bold;
+        font-size: 1.2rem;
         height: 1.5em;
         color: #333;
         margin-bottom: 5px;
-    }
-    .score {
-        font-size: 1.1em;
-        color: #555;
+        transition: color 0.3s;
     }
     .board {
         display: grid;
@@ -58,7 +92,6 @@
         transform-style: preserve-3d;
         position: relative;
     }
-    /* isFlipped 状態のときに反転させる */
     .card.flipped .card-inner {
         transform: rotateY(180deg);
     }
@@ -82,7 +115,6 @@
         box-shadow: 0 4px 8px rgba(0,0,0,0.15);
         user-select: none;
     }
-    /* 表面と裏面（どちらも同等のデザイン） */
     .card-front {
         background-color: #fff;
         color: #2c3e50;
@@ -94,14 +126,24 @@
         transform: rotateY(180deg);
         border: 2px solid #bdc3c7;
     }
-    .card.matched .card-front, .card.matched .card-back {
-        background-color: #27ae60;
+    
+    /* 誰が取ったペアか分かりやすく色を分ける */
+    .card.matched.p1-match .card-front, .card.matched.p1-match .card-back {
+        background-color: #03a9f4;
         color: #fff;
-        border-color: #2ecc71;
+        border-color: #0288d1;
     }
+    .card.matched.p2-match .card-front, .card.matched.p2-match .card-back {
+        background-color: #e91e63;
+        color: #fff;
+        border-color: #c2185b;
+    }
+
+    /* 選択中のカードのハイライト枠 */
     .card.selected .card-front, .card.selected .card-back {
         box-shadow: 0 0 0 4px #f39c12;
     }
+
     .controls {
         margin-top: 25px;
     }
@@ -133,9 +175,14 @@
 <body>
 
 <h1>両面神経衰弱</h1>
+
+<div class="score-board">
+    <div id="score-1" class="player-score player1">1P: 0ペア</div>
+    <div id="score-2" class="player-score player2">2P: 0ペア</div>
+</div>
+
 <div class="info">
-    <div class="message" id="message">カードを2枚めくってください。</div>
-    <div class="score" id="score">獲得ペア: 0</div>
+    <div class="message" id="message"></div>
 </div>
 
 <div class="board" id="game-board"></div>
@@ -145,11 +192,11 @@
 </div>
 
 <div class="instructions">
-    <strong>【ルールと特徴（原案版）】</strong><br>
-    ・A〜Eのすべての組み合わせ（全15枚）を使います。<br>
-    ・カードを2枚めくり、<strong>新たに出た文字同士</strong>が揃えばペア成立です。<br>
-    ・<strong>【重要】</strong>文字が揃わなかった場合、カードは元に戻らず、裏返った状態のまま場に残ります。<br>
-    ・めくるたびに場の文字数が変化するため、タイミングによっては「どうめくっても絶対にペアが作れない（詰み）」状態になります。最終的に何枚残るか（どれだけ少なくできるか）を楽しむゲームです。
+    <strong>【2人対戦ルール】</strong><br>
+    ・1つの画面を使い、1P（青）と2P（赤）で交互にカードを2枚めくります。<br>
+    ・新たに出た文字同士が揃えばペア成立！<strong>続けて同じプレイヤーのターン</strong>になります。<br>
+    ・文字が揃わなかった場合、カードは元に戻らず、<strong>裏返った状態のまま相手のターン</strong>に移ります。<br>
+    ・すべてのペアが取られるか、「手詰まり（場にあるカードから絶対にペアが作れない状態）」になったらゲーム終了。獲得ペア数が多い方の勝利です。
 </div>
 
 <script>
@@ -157,17 +204,21 @@
     let cardsData = [];
     let selectedCards = [];
     let lockBoard = false;
-    let matchedPairs = 0;
+    
+    // 対戦用ステータス
+    let currentPlayer = 1; // 1 or 2
+    let scores = { 1: 0, 2: 0 };
 
     function initGame() {
         const board = document.getElementById('game-board');
         board.innerHTML = '';
         selectedCards = [];
         lockBoard = false;
-        matchedPairs = 0;
-        updateScore();
-        document.getElementById('message').textContent = 'カードを2枚めくってください。';
-        document.getElementById('message').style.color = '#333';
+        
+        // ステータス初期化
+        currentPlayer = 1;
+        scores = { 1: 0, 2: 0 };
+        updateUI();
 
         // 15種類の組み合わせをすべて生成
         let combinations = [];
@@ -188,7 +239,8 @@
                 faceFront: isReversed ? pair[1] : pair[0],
                 faceBack: isReversed ? pair[0] : pair[1],
                 isFlipped: false,
-                isMatched: false
+                isMatched: false,
+                matchedBy: null // 誰が取ったかを記録
             };
         });
         
@@ -216,6 +268,8 @@
 
             board.appendChild(cardElement);
         });
+        
+        showMessage(`1Pのターンです。カードをめくってください。`, '#0277bd');
     }
 
     function flipCard(index, cardElement) {
@@ -225,7 +279,7 @@
         // 同じターンで既に選んだカードは選択できない
         if (selectedCards.some(c => c.index === index)) return;
 
-        // カードを裏返す（状態の反転）
+        // カードを裏返す
         cardsData[index].isFlipped = !cardsData[index].isFlipped;
         cardElement.classList.toggle('flipped');
         cardElement.classList.add('selected');
@@ -233,8 +287,7 @@
         selectedCards.push({ index, element: cardElement });
 
         if (selectedCards.length === 1) {
-            document.getElementById('message').textContent = 'もう1枚めくってください。';
-            document.getElementById('message').style.color = '#333';
+            showMessage(`${currentPlayer}P：もう1枚めくってください。`, currentPlayer === 1 ? '#0277bd' : '#c2185b');
         } else if (selectedCards.length === 2) {
             lockBoard = true;
             checkMatch();
@@ -245,7 +298,6 @@
         const c1 = cardsData[selectedCards[0].index];
         const c2 = cardsData[selectedCards[1].index];
 
-        // 判定には、反転状態を考慮した「現在見えている文字」を使用
         const currentFace1 = c1.isFlipped ? c1.faceBack : c1.faceFront;
         const currentFace2 = c2.isFlipped ? c2.faceBack : c2.faceFront;
 
@@ -253,69 +305,106 @@
             // ペア成立
             c1.isMatched = true;
             c2.isMatched = true;
-            matchedPairs++;
+            c1.matchedBy = currentPlayer;
+            c2.matchedBy = currentPlayer;
+            scores[currentPlayer]++;
             
             selectedCards[0].element.classList.remove('selected');
             selectedCards[1].element.classList.remove('selected');
-            selectedCards[0].element.classList.add('matched');
-            selectedCards[1].element.classList.add('matched');
+            selectedCards[0].element.classList.add('matched', currentPlayer === 1 ? 'p1-match' : 'p2-match');
+            selectedCards[1].element.classList.add('matched', currentPlayer === 1 ? 'p1-match' : 'p2-match');
             
-            updateScore();
+            updateUI();
             
-            document.getElementById('message').textContent = 'ペア成立！';
-            document.getElementById('message').style.color = '#27ae60';
+            showMessage(`ペア成立！ 続けて${currentPlayer}Pのターンです。`, '#27ae60');
             
             setTimeout(() => {
                 selectedCards = [];
                 lockBoard = false;
-                checkGameOver();
+                checkGameOver(true);
             }, 600);
         } else {
-            // ペア不成立（カードは戻さずそのまま）
-            document.getElementById('message').textContent = '違いました（そのまま残ります）。';
-            document.getElementById('message').style.color = '#e74c3c';
+            // ペア不成立
+            showMessage(`違いました。（カードはそのまま残ります）`, '#e74c3c');
             
             setTimeout(() => {
                 selectedCards[0].element.classList.remove('selected');
                 selectedCards[1].element.classList.remove('selected');
                 selectedCards = [];
-                lockBoard = false;
                 
-                checkGameOver();
-            }, 1000);
+                // ターンチェンジ
+                currentPlayer = currentPlayer === 1 ? 2 : 1;
+                updateUI();
+                
+                lockBoard = false;
+                checkGameOver(false);
+            }, 1200);
         }
     }
 
-    function updateScore() {
-        document.getElementById('score').textContent = `獲得ペア: ${matchedPairs}`;
+    function updateUI() {
+        document.getElementById('score-1').textContent = `1P: ${scores[1]}ペア`;
+        document.getElementById('score-2').textContent = `2P: ${scores[2]}ペア`;
+        
+        if (currentPlayer === 1) {
+            document.getElementById('score-1').classList.add('active');
+            document.getElementById('score-2').classList.remove('active');
+        } else {
+            document.getElementById('score-1').classList.remove('active');
+            document.getElementById('score-2').classList.add('active');
+        }
     }
 
-    function checkGameOver() {
+    function showMessage(text, color) {
+        const msgEl = document.getElementById('message');
+        msgEl.textContent = text;
+        msgEl.style.color = color;
+    }
+
+    function checkGameOver(wasMatch) {
         let remainingCards = cardsData.filter(c => !c.isMatched);
         
-        if (remainingCards.length <= 1) {
-             document.getElementById('message').textContent = `ゲーム終了！ 見事なプレイです！ (残り${remainingCards.length}枚)`;
-             document.getElementById('message').style.color = '#2980b9';
-             return;
-        }
+        // 終了条件チェック用変数
+        let isGameOver = false;
+        let gameOverReason = "";
 
-        // 残ったカードの中に共通する文字が1つも無い場合は完全に手詰まり
-        let letterCounts = {};
-        for (let card of remainingCards) {
-            let uniqueLetters = new Set([card.faceFront, card.faceBack]);
-            for (let l of uniqueLetters) {
-                letterCounts[l] = (letterCounts[l] || 0) + 1;
+        if (remainingCards.length <= 1) {
+             isGameOver = true;
+             gameOverReason = `最後のカードです。`;
+        } else {
+            // 手詰まりチェック
+            let letterCounts = {};
+            for (let card of remainingCards) {
+                let uniqueLetters = new Set([card.faceFront, card.faceBack]);
+                for (let l of uniqueLetters) {
+                    letterCounts[l] = (letterCounts[l] || 0) + 1;
+                }
+            }
+
+            let possibleMatchesExist = Object.values(letterCounts).some(count => count >= 2);
+            if (!possibleMatchesExist) {
+                isGameOver = true;
+                gameOverReason = `手詰まりです！`;
             }
         }
 
-        let possibleMatchesExist = Object.values(letterCounts).some(count => count >= 2);
-        
-        if (!possibleMatchesExist) {
-            document.getElementById('message').textContent = `手詰まりです！ (残り${remainingCards.length}枚)`;
-            document.getElementById('message').style.color = '#8e44ad';
-        } else if (selectedCards.length === 0) {
-            document.getElementById('message').textContent = 'カードを2枚めくってください。';
-            document.getElementById('message').style.color = '#333';
+        // ゲームオーバー処理
+        if (isGameOver) {
+            let resultText = "";
+            if (scores[1] > scores[2]) resultText = "1Pの勝利！";
+            else if (scores[2] > scores[1]) resultText = "2Pの勝利！";
+            else resultText = "引き分け！";
+            
+            showMessage(`終了（${gameOverReason}） ${resultText}`, '#8e44ad');
+            document.getElementById('score-1').classList.remove('active');
+            document.getElementById('score-2').classList.remove('active');
+            lockBoard = true;
+            return;
+        }
+
+        // ゲーム続行の場合のメッセージ更新
+        if (!wasMatch) {
+            showMessage(`${currentPlayer}Pのターンです。カードをめくってください。`, currentPlayer === 1 ? '#0277bd' : '#c2185b');
         }
     }
 
